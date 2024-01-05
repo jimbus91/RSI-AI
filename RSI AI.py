@@ -98,7 +98,7 @@ else:
     ax1.plot(predictions_df.index, predictions_df['Close'], color='green' if predictions_df['Close'][-1] >= last_year['Close'][-1] else 'red', label='Predicted')
     ax1.plot(last_year.index, last_year['Close'], color='blue', label='Actual')
     ax1.set_ylabel('Price (USD)')
-    ax1.set_title(stock_ticker + ' RSI Price Prediction')
+    ax1.set_title(stock_ticker.upper() + ' RSI Price Prediction')
     ax1.set_xticks([])
     ax1.legend(loc='upper right')
 
