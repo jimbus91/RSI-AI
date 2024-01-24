@@ -1,4 +1,5 @@
 import os
+import warnings
 import datetime
 import numpy as np
 import pandas as pd
@@ -7,113 +8,121 @@ import matplotlib.pyplot as plt
 import matplotlib.style as style
 import matplotlib.dates as mdates
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.experimental import enable_hist_gradient_boosting
 
-# Ask the user for the stock ticker symbol
-stock_ticker = input("Enter the stock ticker symbol: ")
+# Suppress specific warnings
+warnings.filterwarnings('ignore', category=FutureWarning, message="Series.__getitem__ treating keys as positions is deprecated.*")
 
-# Get today's date
-today = datetime.datetime.now().date()
+while True:
+    # Ask the user for the stock ticker symbol
+    stock_ticker = input("Enter the stock ticker symbol or 'exit' to finish: ")
+    if stock_ticker.lower() == 'exit':
+        break
 
-# Subtract 365 days from today's date
-one_year_ago = today - datetime.timedelta(days=365)
+    # Get today's date
+    today = datetime.datetime.now().date()
 
-# Use the date one year ago as the start parameter in yf.download()
-data = yf.download(stock_ticker, start=one_year_ago)
+    # Subtract 365 days from today's date
+    one_year_ago = today - datetime.timedelta(days=365)
 
-if data.empty:
-    print("No data available for the stock ticker symbol: ", stock_ticker)
-else:
-    # Convert the date column to a datetime object
-    data['Date'] = pd.to_datetime(data.index)
+    # Use the date one year ago as the start parameter in yf.download()
+    data = yf.download(stock_ticker, start=one_year_ago)
 
-    # Set the date column as the index
-    data.set_index('Date', inplace=True)
+    if data.empty:
+        print("No data available for the stock ticker symbol:", stock_ticker, ". Please try another symbol.")
+        continue
+    else:
+        # Convert the date column to a datetime object
+        data['Date'] = pd.to_datetime(data.index)
 
-    # Sort the data by date
-    data.sort_index(inplace=True)
+        # Set the date column as the index
+        data.set_index('Date', inplace=True)
 
-    # Get the data for the last year
-    last_year = data.iloc[-365:].copy()
+        # Sort the data by date
+        data.sort_index(inplace=True)
 
-    # Calculate the moving average
-    last_year.loc[:,'MA'] = last_year['Close'].rolling(window=20).mean()
+        # Get the data for the last year
+        last_year = data.iloc[-365:].copy()
 
-    # Calculate the relative strength index
-    last_year['delta'] = last_year['Close'] - last_year['Close'].shift(1)
-    last_year['gain'] = np.where(last_year['delta'] > 0, last_year['delta'], 0)
-    last_year['loss'] = np.where(last_year['delta'] < 0, abs(last_year['delta']), 0)
-    avg_gain = last_year['gain'].rolling(window=14).mean()
-    avg_loss = last_year['loss'].rolling(window=14).mean()
-    last_year['RS'] = avg_gain / avg_loss
-    last_year['RSI'] = 100 - (100 / (1 + last_year['RS']))
+        # Calculate the moving average
+        last_year.loc[:,'MA'] = last_year['Close'].rolling(window=20).mean()
 
-    # Split the data into X (features) and y (target)
-    X = last_year[['RSI']]
-    y = last_year['Close']
+        # Calculate the relative strength index
+        last_year['delta'] = last_year['Close'] - last_year['Close'].shift(1)
+        last_year['gain'] = np.where(last_year['delta'] > 0, last_year['delta'], 0)
+        last_year['loss'] = np.where(last_year['delta'] < 0, abs(last_year['delta']), 0)
+        avg_gain = last_year['gain'].rolling(window=14).mean()
+        avg_loss = last_year['loss'].rolling(window=14).mean()
+        last_year['RS'] = avg_gain / avg_loss
+        last_year['RSI'] = 100 - (100 / (1 + last_year['RS']))
 
-    # Create an HistGradientBoostingRegressor instance
-    model = HistGradientBoostingRegressor()
+        # Split the data into X (features) and y (target)
+        X = last_year[['RSI']]
+        y = last_year['Close']
 
-    # Fit the model with the data
-    model.fit(X, y)
+        # Create an HistGradientBoostingRegressor instance
+        model = HistGradientBoostingRegressor()
 
-    # Make predictions for the next 30 days
-    future_dates = pd.date_range(start=data.index[-1], periods=30, freq='D')
-    future_data = pd.DataFrame(index=future_dates, columns=['RSI'])
-    future_data['RSI'] = last_year['RSI'].iloc[-1]
+        # Fit the model with the data
+        model.fit(X, y)
 
-    predictions = model.predict(future_data)
-    predictions_df = pd.DataFrame(predictions, index=future_dates, columns=['Close'])
+        # Make predictions for the next 30 days
+        future_dates = pd.date_range(start=data.index[-1], periods=30, freq='D')
+        future_data = pd.DataFrame(index=future_dates, columns=['RSI'])
+        future_data['RSI'] = last_year['RSI'].iloc[-1]
 
-    # Calculate the standard deviation of the last year's close prices
-    std_dev = last_year['Close'].std()
+        predictions = model.predict(future_data)
+        predictions_df = pd.DataFrame(predictions, index=future_dates, columns=['Close'])
 
-    # Generate random values with a standard deviation of 0.5 * the last year's close prices standard deviation
-    random_values = np.random.normal(0, 0.2 * std_dev, predictions.shape)
+        # Calculate the standard deviation of the last year's close prices
+        std_dev = last_year['Close'].std()
 
-    # Add the random values to the predicted prices
-    predictions += random_values 
-    predictions_df = pd.DataFrame(predictions, index=future_dates, columns=['Close'])
+        # Generate random values with a standard deviation of 0.5 * the last year's close prices standard deviation
+        random_values = np.random.normal(0, 0.2 * std_dev, predictions.shape)
 
-    # Concatenate the last_year and predictions dataframes
-    predictions_df = pd.concat([last_year, predictions_df])
+        # Add the random values to the predicted prices
+        predictions += random_values 
+        predictions_df = pd.DataFrame(predictions, index=future_dates, columns=['Close'])
 
-    # Recalculate RSI for the next 30 days
-    predictions_df['delta'] = predictions_df['Close'] - predictions_df['Close'].shift(1)
-    predictions_df['gain'] = np.where(predictions_df['delta'] > 0, predictions_df['delta'], 0)
-    predictions_df['loss'] = np.where(predictions_df['delta'] < 0, abs(predictions_df['delta']), 0)
-    avg_gain = predictions_df['gain'].rolling(window=14).mean()
-    avg_loss = predictions_df['loss'].rolling(window=14).mean()
-    predictions_df['RS'] = avg_gain / avg_loss
-    predictions_df['RSI'] = 100 - (100 / (1 + predictions_df['RS']))
+        # Concatenate the last_year and predictions dataframes
+        predictions_df = pd.concat([last_year, predictions_df])
 
-    # Set the style to dark theme
-    style.use('dark_background')
+        # Recalculate RSI for the next 30 days
+        predictions_df['delta'] = predictions_df['Close'] - predictions_df['Close'].shift(1)
+        predictions_df['gain'] = np.where(predictions_df['delta'] > 0, predictions_df['delta'], 0)
+        predictions_df['loss'] = np.where(predictions_df['delta'] < 0, abs(predictions_df['delta']), 0)
+        avg_gain = predictions_df['gain'].rolling(window=14).mean()
+        avg_loss = predictions_df['loss'].rolling(window=14).mean()
+        predictions_df['RS'] = avg_gain / avg_loss
+        predictions_df['RSI'] = 100 - (100 / (1 + predictions_df['RS']))
 
-    # Create the plot
-    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
+        # Set the style to dark theme
+        style.use('dark_background')
 
-    # Plot the predicted close prices for the next 30 days
-    ax1.plot(predictions_df.index, predictions_df['Close'], color='green' if predictions_df['Close'][-1] >= last_year['Close'][-1] else 'red', label='Predicted')
-    ax1.plot(last_year.index, last_year['Close'], color='blue', label='Actual')
-    ax1.set_ylabel('Price (USD)')
-    ax1.set_title(stock_ticker.upper() + ' RSI Price Prediction')
-    ax1.set_xticks([])
-    ax1.legend(loc='upper right')
+        # Create the plot
+        fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
 
-    # Plot the RSI on the second chart
-    ax2.plot(predictions_df['RSI'], color='purple', label='RSI')
-    ax2.set_ylabel('Relative Strength Index')
-    ax2.legend(loc='lower left')
+        # Plot the predicted close prices for the next 30 days
+        ax1.plot(predictions_df.index, predictions_df['Close'], color='green' if predictions_df['Close'][-1] >= last_year['Close'][-1] else 'red', label='Predicted')
+        ax1.plot(last_year.index, last_year['Close'], color='blue', label='Actual')
+        ax1.set_ylabel('Price (USD)')
+        ax1.set_title(stock_ticker.upper() + ' RSI Price Prediction')
+        ax1.set_xticks([])
+        ax1.legend(loc='upper right')
 
-    # Set x-axis as date format
-    ax1, ax2.xaxis.set_major_formatter(mdates.DateFormatter("%B %D %Y"))
-    plt.xticks(rotation=45)
+        # Plot the RSI on the second chart
+        ax2.plot(predictions_df.index, predictions_df['RSI'], color='purple', label='RSI')
+        ax2.set_ylabel('Relative Strength Index')
+        ax2.legend(loc='lower left')
 
-    # Set the x-axis limits to be the same for both subplots
-    ax1.set_xlim(predictions_df.index[0], predictions_df.index[-1])
-    ax2.set_xlim(predictions_df.index[0], predictions_df.index[-1])
+        # Set x-axis as date format
+        for ax in [ax1, ax2]:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%B %D %Y"))
+        plt.xticks(rotation=45)
 
-    # Show the plot
-    plt.show()
+        # Set the x-axis limits to be the same for both subplots
+        ax1.set_xlim(predictions_df.index[0], predictions_df.index[-1])
+        ax2.set_xlim(predictions_df.index[0], predictions_df.index[-1])
+
+        # Show the plot
+        plt.show()
+
